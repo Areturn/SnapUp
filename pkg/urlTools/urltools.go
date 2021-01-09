@@ -1,4 +1,4 @@
-package url_tools
+package urlTools
 
 import (
 	"fmt"

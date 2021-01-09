@@ -16,3 +16,7 @@
 
 .idea
 *.cookies
+cache
+test
+fyne_demo
+internal
