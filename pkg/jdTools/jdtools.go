@@ -317,6 +317,7 @@ func (Tools *JdInfo) CheckLogin() (code int, err error) {
 			if qctv.ReturnCode == 0 {
 				Tools.LoginStatus = true
 				err = Tools.CookiesJar.Save()
+				//ioutil.WriteFile("/tmp/test.log",[]byte(err.Error()),0644)
 				if err != nil {
 					code = 300
 				}
@@ -438,12 +439,14 @@ func (Tools *JdInfo) AutoObtainEidFp() (err error) {
 }
 
 func (Tools *JdInfo) ManualObtainEidFp() (err error) {
-	var filepath string
+	var filepath, url string
 	filepath, err = urlTools.SaveHtml("geteidfp", GetEidFpHtml)
 	if err != nil {
 		return
 	}
-	err = webbrowser.Open("file://" + filepath)
+	url = strings.ReplaceAll("file://"+filepath, `\`, `/`)
+	err = webbrowser.Open(url)
+	//fmt.Println("file://" + filepath)
 	return
 }
 

@@ -116,7 +116,7 @@ func jdLogin(tools *jdTools.JdInfo, a fyne.App, w fyne.Window) (err error) {
 					login("二维码已取消授权,请重新扫描")
 				} else if code == 300 {
 					getQrcode()
-					login("二维码校验异常，请重新扫描")
+					login(fmt.Sprintf("二维码校验异常，请重新扫描\n%s", err2))
 				} else if code == 200 {
 					loginCheck = true
 					break
@@ -205,6 +205,14 @@ func jdPage(tools *jdTools.JdInfo, a fyne.App, w fyne.Window) (err error) {
 			go func() {
 				for {
 					concurrency <- "1"
+					if tools.Eid == "" || tools.Fp == "" {
+						_ = <-concurrency
+						time.Sleep(2 * time.Second)
+						log <- "等待Eid,Fp获取中..."
+						continue
+					} else {
+						log <- fmt.Sprintf("已获取Eid: %s ,Fp: %s", tools.Eid, tools.Fp)
+					}
 					if tools.GoodsInfo[goodsId].SnapUpStatus == true || tools.GoodsInfo[goodsId].SnapUpEndStatus == true || tools.GoodsInfo[goodsId].SnapUpStop == true {
 						close(concurrency)
 						//fmt.Println("test")
@@ -312,18 +320,19 @@ func getEipAndFp(w fyne.Window, tools *jdTools.JdInfo) (err error) {
 		if err != nil {
 			return
 		}
-		eip := widget.NewEntry()
-		fp := widget.NewEntry()
-		content := widget.NewForm(widget.NewFormItem("Eip", eip), widget.NewFormItem("Fp", fp))
-
-		dialog.ShowCustomConfirm("填入浏览器页面中的eip和fp", "确认", "取消", content, func(b bool) {
-			if b {
-				tools.Eid = eip.Text
-				tools.Fp = fp.Text
-			} else {
-				err = fmt.Errorf("未获取到Eip和Fp值，无法继续抢购")
-			}
-		}, w)
+		//eip := widget.NewEntry()
+		//fp := widget.NewEntry()
+		//content := widget.NewForm(widget.NewFormItem("Eip", eip), widget.NewFormItem("Fp", fp))
+		//
+		//dialog.ShowCustomConfirm("填入浏览器页面中的eip和fp", "确认", "取消", content, func(b bool) {
+		//	if b {
+		//		tools.Eid = eip.Text
+		//		tools.Fp = fp.Text
+		//	} else {
+		//		w.Close()
+		//	}
+		//}, w)
+		getEipFpDialog("填入浏览器页面中的eip和fp", w, tools)
 	} else {
 		err = tools.AutoObtainEidFp()
 		if err != nil {
@@ -331,6 +340,23 @@ func getEipAndFp(w fyne.Window, tools *jdTools.JdInfo) (err error) {
 		}
 	}
 	return
+}
+
+func getEipFpDialog(title string, w fyne.Window, tools *jdTools.JdInfo) {
+	eip := widget.NewEntry()
+	fp := widget.NewEntry()
+	content := widget.NewForm(widget.NewFormItem("Eip", eip), widget.NewFormItem("Fp", fp))
+	dialog.ShowCustomConfirm(title, "确认", "取消", content, func(b bool) {
+		if b {
+			tools.Eid = eip.Text
+			tools.Fp = fp.Text
+			if tools.Eid == "" || tools.Fp == "" {
+				getEipFpDialog("eip和fp不能为空！", w, tools)
+			}
+		} else {
+			w.Close()
+		}
+	}, w)
 }
 
 func makeCell() fyne.CanvasObject {

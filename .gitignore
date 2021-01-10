@@ -20,3 +20,4 @@ cache
 test
 fyne_demo
 internal
+*.syso

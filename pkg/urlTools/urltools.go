@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	//cookiejar "github.com/juju/persistent-cookiejar"
@@ -17,12 +18,6 @@ import (
 var CacheDir = "cache"
 
 func AddHeader(request *http.Request, headers map[string]string) (NewRequest *http.Request) {
-	//request.Header.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.88 Safari/537.36")
-	//request.Header.Add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9")
-	//request.Header.Add("Connection", "keep-alive")
-	//request.Header.Add("Cache-Control", "max-age=0")
-	//request.Header.Add("Upgrade-Insecure-Requests", "1")
-	//request.Header.Add("Accept-Language", "zh-CN,zh;q=0.9")
 	for k, v := range headers {
 		request.Header.Add(k, v)
 	}
@@ -31,33 +26,22 @@ func AddHeader(request *http.Request, headers map[string]string) (NewRequest *ht
 }
 
 func InitCookieJar(Cookiejar *cookiejar.Jar, File string) (NewCookiejar *cookiejar.Jar, err error) {
+	var path string
 	if Cookiejar == nil {
-		//NewCookiejar, _ = cookiejar.New(nil)
-		//var stat os.FileInfo
-		//if stat, err = os.Stat(CacheDir); err != nil && os.IsExist(err) {
-		//	return
-		//} else if os.IsNotExist(err) {
-		//	err = os.MkdirAll(CacheDir, os.ModePerm)
-		//	if err != nil {
-		//		return
-		//	}
-		//} else if ! stat.IsDir() {
-		//	err = fmt.Errorf("目录'%s'已存在，且是个文件，请检查。",CacheDir)
+		path, err = CreateDir(CacheDir)
+		if err != nil {
+			return
+		}
+		//path, err = AsbPath()
+		//if err != nil {
 		//	return
 		//}
-		err = CreateDir(CacheDir)
-		if err != nil {
-			return
-		}
-		var path string
-		path, err = AsbPath()
-		if err != nil {
-			return
-		}
-		// 调试
-		path = "."
+		// ide调试时开启
+		//path = "./cache"
 
-		NewCookiejar, _ = cookiejar.New(&cookiejar.Options{Filename: path + "/" + CacheDir + "/" + File, PersistSessionCookies: true})
+		NewCookiejar, _ = cookiejar.New(&cookiejar.Options{Filename: path + "/" + File, PersistSessionCookies: true})
+		//fmt.Println(path + "/" + CacheDir + "/" + File)
+		//ioutil.WriteFile("/tmp/test1.log",[]byte(path + "/" + CacheDir + "/" + File),0644)
 		//NewCookiejar, _ = cookiejar.New(nil)
 		return
 	}
@@ -68,29 +52,31 @@ func InitCookieJar(Cookiejar *cookiejar.Jar, File string) (NewCookiejar *cookiej
 func WriteHTML(content string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
-		io.WriteString(w, strings.TrimSpace(content))
+		_, _ = io.WriteString(w, strings.TrimSpace(content))
 	})
 }
 
 func SaveHtml(filename string, content string) (filepath string, err error) {
 	//var file *os.File
-	err = CreateDir(CacheDir)
-	if err != nil {
-		return
-	}
 	var path string
-	path, err = AsbPath()
+	path, err = CreateDir(CacheDir)
 	if err != nil {
 		return
 	}
-	// 调试
-	path = "."
+	//var path string
+	//path, err = AsbPath()
+	//if err != nil {
+	//	return
+	//}
+	// ide调试时开启
+	//path = "./cache"
+
 	//file, err = os.OpenFile(path+"/"+CacheDir+"/"+filename+".html", os.O_CREATE|os.O_RDWR, 0640)
 	//if err != nil {
 	//	return
 	//}
 	//defer file.Close()
-	filepath = path + "/" + CacheDir + "/" + filename + ".html"
+	filepath = path + "/" + filename + ".html"
 	err = ioutil.WriteFile(filepath, []byte(content), 0640)
 	//if err != nil {
 	//	return
@@ -98,20 +84,28 @@ func SaveHtml(filename string, content string) (filepath string, err error) {
 	return
 }
 
-func CreateDir(dir string) (err error) {
+func CreateDir(dir string) (dirPath string, err error) {
 	var stat os.FileInfo
-	if stat, err = os.Stat(CacheDir); err != nil && os.IsExist(err) {
+	var path string
+	if !regexp.MustCompile(`^/`).MatchString(dir) {
+		path, err = AsbPath()
+		if err != nil {
+			return
+		}
+		dir = path + "/" + dir
+	}
+	if stat, err = os.Stat(dir); err != nil && os.IsExist(err) {
 		return
 	} else if os.IsNotExist(err) {
-		err = os.MkdirAll(CacheDir, os.ModePerm)
+		err = os.MkdirAll(dir, os.ModePerm)
 		if err != nil {
 			return
 		}
 	} else if !stat.IsDir() {
-		err = fmt.Errorf("目录'%s'已存在,且是个文件,请检查.", CacheDir)
+		err = fmt.Errorf("目录'%s'已存在,且是个文件,请检查.", dir)
 		return
 	}
-	return
+	return dir, nil
 }
 
 func AsbPath() (path string, err error) {
