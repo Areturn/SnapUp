@@ -2,6 +2,7 @@ package window
 
 import (
 	"SnapUp/pkg/jdTools"
+	"SnapUp/pkg/logger"
 	"SnapUp/pkg/urlTools"
 	"fmt"
 	"fyne.io/fyne"
@@ -14,6 +15,7 @@ import (
 	"image"
 	"image/color"
 	"net/url"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -21,6 +23,8 @@ import (
 )
 
 var userName string
+
+var logApi = logger.Newlogger(logger.DEBUG, os.Stdout, logger.Ldate|logger.Lmicroseconds|logger.Llongfile)
 
 func JdEntrance(a fyne.App, w fyne.Window) (err error) {
 	w.SetTitle("抢购神器-京东模式")
@@ -184,6 +188,7 @@ func jdPage(tools *jdTools.JdInfo, a fyne.App, w fyne.Window) (err error) {
 			var err2 error
 			goodsId, err2 = tools.Reservation(jdUrl.Text)
 			if err2 != nil {
+				logApi.DEBUG(err2.Error())
 				log <- err2.Error()
 				return
 			}
@@ -191,6 +196,7 @@ func jdPage(tools *jdTools.JdInfo, a fyne.App, w fyne.Window) (err error) {
 			if tools.Eid == "" || tools.Fp == "" {
 				err2 := getEipAndFp(w, tools)
 				if err2 != nil {
+					logApi.DEBUG(err2.Error())
 					log <- err2.Error()
 					return
 				}
@@ -204,7 +210,10 @@ func jdPage(tools *jdTools.JdInfo, a fyne.App, w fyne.Window) (err error) {
 			var concurrency = make(chan string, 2)
 			go func() {
 				for {
-					concurrency <- "1"
+					if tools.GoodsInfo[goodsId].SnapUpStop == true {
+						close(concurrency)
+						break
+					}
 					if tools.Eid == "" || tools.Fp == "" {
 						_ = <-concurrency
 						time.Sleep(2 * time.Second)
@@ -212,35 +221,42 @@ func jdPage(tools *jdTools.JdInfo, a fyne.App, w fyne.Window) (err error) {
 						continue
 					} else {
 						log <- fmt.Sprintf("已获取Eid: %s ,Fp: %s", tools.Eid, tools.Fp)
-					}
-					if tools.GoodsInfo[goodsId].SnapUpStatus == true || tools.GoodsInfo[goodsId].SnapUpEndStatus == true || tools.GoodsInfo[goodsId].SnapUpStop == true {
-						close(concurrency)
-						//fmt.Println("test")
 						break
 					}
-					log <- fmt.Sprintf("等待抢购开始")
-					for {
-						if tools.GoodsInfo[goodsId].SnapUpStop == true {
-							close(concurrency)
-							return
-						}
-						surplusTime, err2 := tools.SnapUpStartSurplusTime(goodsId)
-						if err2 != nil {
-							log <- err2.Error()
-							//_ = <-concurrency
-							continue
-						}
-						if surplusTime.Seconds() <= 12 {
-							log <- fmt.Sprintf("抢购开始了!")
-							break
-						} else {
-							log <- fmt.Sprintf("距离抢购开始还有: %s", surplusTime.String())
-							time.Sleep(10 * time.Second)
-						}
+				}
+				log <- fmt.Sprintf("等待抢购开始")
+				for {
+					// 调试
+					//break
+
+					if tools.GoodsInfo[goodsId].SnapUpStop == true {
+						close(concurrency)
+						return
+					}
+					surplusTime, err2 := tools.SnapUpStartSurplusTime(goodsId)
+					if err2 != nil {
+						logApi.DEBUG(err2.Error())
+						log <- err2.Error()
+						continue
+					}
+					if surplusTime.Seconds() <= 12 {
+						log <- fmt.Sprintf("抢购开始了!")
+						break
+					} else {
+						log <- fmt.Sprintf("距离抢购开始还有: %s", surplusTime.String())
+						time.Sleep(10 * time.Second)
+					}
+				}
+				for {
+					concurrency <- "1"
+					if tools.GoodsInfo[goodsId].SnapUpStatus == true || tools.GoodsInfo[goodsId].SnapUpEndStatus == true || tools.GoodsInfo[goodsId].SnapUpStop == true {
+						close(concurrency)
+						break
 					}
 					go func() {
 						err2 = tools.SnapUp(goodsId, log)
 						if err2 != nil {
+							logApi.DEBUG(err2.Error())
 							log <- err2.Error()
 						}
 						_ = <-concurrency
@@ -360,7 +376,7 @@ func getEipFpDialog(title string, w fyne.Window, tools *jdTools.JdInfo) {
 }
 
 func makeCell() fyne.CanvasObject {
-	rect := canvas.NewRectangle(&color.NRGBA{128, 128, 128, 255})
+	rect := canvas.NewRectangle(&color.NRGBA{R: 128, G: 128, B: 128, A: 255})
 	rect.SetMinSize(fyne.NewSize(2, 2))
 	return rect
 }

@@ -1,23 +1,16 @@
-package jdTools
+package snTools
 
 import (
-	"SnapUp/pkg/logger"
 	"SnapUp/pkg/urlTools"
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"github.com/PuerkitoBio/goquery"
-	"github.com/chromedp/chromedp"
 	cookiejar "github.com/orirawlings/persistent-cookiejar"
-	"github.com/toqueteos/webbrowser"
 	"image"
-	"io"
 	"io/ioutil"
 	"math/rand"
 	"net/http"
-	"net/http/httptest"
-	"os"
 	"strings"
 	//"text/template/parse"
 
@@ -28,13 +21,11 @@ import (
 	"time"
 )
 
-type JdTools interface {
+type SnTools interface {
 	GetLoginQrcode() (qrcode image.Image, err error)                           //获取登录二维码
 	CheckLogin() (code int, err error)                                         //检查是否扫描登录成功
 	GetUserInfo() (err error)                                                  //获取用户信息
 	CheckCookies() (code int, err error)                                       //检查cookies是否过期
-	AutoObtainEidFp() (err error)                                              //自动获取eid和fp
-	ManualObtainEidFp() (err error)                                            //手动获取eid和fp
 	Reservation(JdUrl string) (goodsId int, err error)                         //预约
 	SnapUpStartSurplusTime(goodsId int) (SurplusTime time.Duration, err error) //等待抢购开始还有多长时间
 	SnapUp(goodsId int, logChan chan<- string) (err error)                     //抢购
@@ -84,7 +75,7 @@ type GoodsInfo struct {
 
 //var GoodsInfos = map[int]GoodsInfo{}
 
-type JdInfo struct {
+type SnInfo struct {
 	UserInfo    UserInfo
 	LoginStatus bool
 	GoodsInfo   map[int]*GoodsInfo
@@ -93,140 +84,64 @@ type JdInfo struct {
 	Fp          string
 }
 
-var Headers = map[string]string{"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.88 Safari/537.36",
-	"Accept":                    "text/html,application/xhtml+xml,application/xml,application/json;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9",
-	"Connection":                "keep-alive",
-	"Cache-Control":             "max-age=0",
-	"Upgrade-Insecure-Requests": "1",
-	"Accept-Language":           "zh-CN,zh;q=0.9"}
+var Headers = map[string]string{"User-Agent": "Mozilla/5.0(Linux; U;SNEBUY-APP;9.5.4-396;SNCLIENT; Android 9; zh; ONEPLUS A5010) AppleWebKit/533.0 (KHTML, like Gecko) Version/4.0 Mobile Safari/533.1 maa/2.2.2",
+	"Accept":          "text/html,application/xhtml+xml,application/xml,application/json;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9",
+	"Connection":      "keep-alive",
+	"Cache-Control":   "max-age=0",
+	"Accept-Language": "zh-CN,zh;q=0.9"}
 
-var GetEidFpHtml = `<!DOCTYPE html>
-<html lang="en">
-<head></head>
-<body>
-<div >eid:</div>
-<div id="eid"></div>
-<div >fp:</div>
-<div id="fp"></div>
-<div id="end"></div>
-</body>
-</html>
-
-<script src="https://gias.jd.com/js/td.js"></script>
-
-<script>
-    setTimeout(function () {
-        try {
-            getJdEid(function (eid, fp, udfp) {
-                document.getElementById('eid').innerText = eid;
-                document.getElementById('fp').innerText = fp;
-                document.getElementById('end').innerHTML = '<form id="endok"></form>';
-            });
-        } catch (e) {
-            document.getElementById('info').innerText = e;
-        }
-    }, 1000);
-</script>`
-
-var CookiesFile = "jd.cookies"
+var CookiesFile = "sn.cookies"
 var LocalZone = time.FixedZone("CST", int((8 * time.Hour).Seconds()))
-var logApi = logger.Newlogger(logger.DEBUG, os.Stdout, logger.Ldate|logger.Lmicroseconds|logger.Llongfile)
 
-func Init() *JdInfo {
-	info := &JdInfo{GoodsInfo: make(map[int]*GoodsInfo)}
+func Init() *SnInfo {
+	info := &SnInfo{GoodsInfo: make(map[int]*GoodsInfo)}
 	return info
 }
 
-func (Tools *JdInfo) GetLoginQrcode() (qrcode image.Image, err error) {
+func (Tools *SnInfo) GetLoginQrcode() (qrcode image.Image, err error) {
 	var request *http.Request
 	var response *http.Response
 
-	//Tools.CookiesJar,_ = cookiejar.New(nil)
 	Tools.CookiesJar, err = urlTools.InitCookieJar(Tools.CookiesJar, CookiesFile)
 	if err != nil {
 		return
 	}
-	//fmt.Println(Tools.CookiesJar)
 
 	client := &http.Client{CheckRedirect: nil, Jar: Tools.CookiesJar}
 	// 打开登录页
-	LoginUrl := "https://passport.jd.com/new/login.aspx"
+	LoginUrl := "https://passport.suning.com/ids/login"
 	request, _ = http.NewRequest("GET", LoginUrl, nil)
 	request = urlTools.AddHeader(request, Headers)
 	response, err = client.Do(request)
 	if err != nil {
 		return
 	}
-	//defer response.Body.Close()
 	_ = response.Body.Close()
-	//fmt.Println(response.Cookies())
-	//Tools.Client.Jar.SetCookies(response.Request.URL,response.Cookies())
 
-	QrcodeUrl := "https://qr.m.jd.com/show"
-	var QueryValues url.Values = map[string][]string{"appid": {"133"}, "size": {"147"}, "t": {strconv.FormatInt(time.Now().UnixNano(), 10)[:13]}}
+	QrcodeUrl := "https://passport.suning.com/ids/qrLoginUuidGenerate.htm?image=true&yys=1610282949429"
+	var QueryValues url.Values = map[string][]string{"image": {"true"}, "yys": {strconv.FormatInt(time.Now().UnixNano(), 10)[:13]}, "t": {strconv.FormatInt(time.Now().UnixNano(), 10)[:13]}}
 	parse, _ := url.Parse(QrcodeUrl)
 	parse.RawQuery = QueryValues.Encode()
-	//fmt.Println(parse.String())
 	request, _ = http.NewRequest("GET", parse.String(), nil)
 	request = urlTools.AddHeader(request, Headers)
-	request.Header.Add("Referer", "https://passport.jd.com/")
-	//url_tools.AddCookies(request,response.Cookies())
-	//fmt.Println(request)
+	request.Header.Add("Referer", "https://passport.suning.com/ids/login")
 	response, err = client.Do(request)
-	//response2,err = http.Get("https://qr.m.jd.com/show?appid=133&size=147&t=1609429653561")
 	if err != nil {
 		return
 	}
-	//defer response.Body.Close()
-	//Tools.Client.Jar.SetCookies(response.Request.URL,response.Cookies())
 	if response.StatusCode == 200 {
-		var n int
-		buf := make([]byte, 1024)
 		var body []byte
-		//var f *os.File
-		//fmt.Println(response.Request)
-		for {
-			n, err = response.Body.Read(buf)
-			if err != nil && err != io.EOF {
-				return
-			}
-			if n == 0 {
-				break
-			}
-			body = append(body, buf...)
-		}
-		//f, err = os.OpenFile("test.png", os.O_RDWR|os.O_CREATE, 0644)
-		//if err != nil {
-		//	return
-		//}
-		//_, err = f.Write(body)
-
-		//fmt.Println(response.Cookies())
-		//f, _ := os.OpenFile("test.cookies", os.O_RDWR|os.O_CREATE, 0600)
-		//defer f.Close()
-		//enc := gob.NewEncoder(f)
-		//enc.Encode(response.Cookies())
-		//i := client.Jar.Cookies(response.Request.URL)
-		_ = response.Body.Close()
-
+		body, err = ioutil.ReadAll(response.Body)
 		qrcode, _, err = image.Decode(bytes.NewReader(body))
-		//cookies = response.Cookies()
-		//myApp := app.New()
-		//w := myApp.NewWindow("Image")
-		//image1 := canvas.NewImageFromImage(qrcode)
-		//image1.FillMode = canvas.ImageFillOriginal
-		//w.SetContent(image1)
-		//
-		//w.ShowAndRun()
-
 	} else {
 		err = fmt.Errorf("状态码：%s,获取登录二维码失败", response.Status)
 	}
+	_ = response.Body.Close()
 
 	return
 }
 
-func (Tools *JdInfo) CheckLogin() (code int, err error) {
+func (Tools *SnInfo) CheckLogin() (code int, err error) {
 	type QrCheckInfo struct {
 		Code   int    `json:"code"`
 		Msg    string `json:"msg"`
@@ -344,7 +259,7 @@ func (Tools *JdInfo) CheckLogin() (code int, err error) {
 	//return
 }
 
-func (Tools *JdInfo) GetUserInfo() (err error) {
+func (Tools *SnInfo) GetUserInfo() (err error) {
 	var request *http.Request
 	var response *http.Response
 	var readAll []byte
@@ -378,7 +293,7 @@ func (Tools *JdInfo) GetUserInfo() (err error) {
 	return
 }
 
-func (Tools *JdInfo) CheckCookies() (code int, err error) {
+func (Tools *SnInfo) CheckCookies() (code int, err error) {
 	var request *http.Request
 	var response *http.Response
 	Tools.CookiesJar, err = urlTools.InitCookieJar(Tools.CookiesJar, CookiesFile)
@@ -414,46 +329,7 @@ func (Tools *JdInfo) CheckCookies() (code int, err error) {
 	return
 }
 
-func (Tools *JdInfo) AutoObtainEidFp() (err error) {
-	var allocCtx = context.Background()
-	// 关闭无头模式
-	//opts := append(chromedp.DefaultExecAllocatorOptions[:],
-	//	chromedp.Flag("headless", false),
-	//)
-	//allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
-	//defer cancel()
-
-	ctx, cancel := chromedp.NewContext(allocCtx)
-	defer cancel()
-	ts := httptest.NewServer(urlTools.WriteHTML(GetEidFpHtml))
-	defer ts.Close()
-	if err = chromedp.Run(ctx,
-		chromedp.Navigate(ts.URL),
-		chromedp.WaitVisible(`#endok`, chromedp.ByID),
-		chromedp.Text(`#eid`, &Tools.Eid),
-		chromedp.Text(`#fp`, &Tools.Fp),
-	); err != nil {
-		return
-	}
-	if Tools.Eid == "" || Tools.Fp == "" {
-		err = Tools.AutoObtainEidFp()
-	}
-	return
-}
-
-func (Tools *JdInfo) ManualObtainEidFp() (err error) {
-	var filepath, url string
-	filepath, err = urlTools.SaveHtml("geteidfp", GetEidFpHtml)
-	if err != nil {
-		return
-	}
-	url = strings.ReplaceAll("file://"+filepath, `\`, `/`)
-	err = webbrowser.Open(url)
-	//fmt.Println("file://" + filepath)
-	return
-}
-
-func (Tools *JdInfo) Reservation(JdUrl string) (goodsId int, err error) {
+func (Tools *SnInfo) Reservation(JdUrl string) (goodsId int, err error) {
 	//var goodsId int
 	var request *http.Request
 	var response *http.Response
@@ -551,7 +427,7 @@ func (Tools *JdInfo) Reservation(JdUrl string) (goodsId int, err error) {
 	//return
 }
 
-func (Tools *JdInfo) SnapUpStartSurplusTime(goodsId int) (SurplusTime time.Duration, err error) {
+func (Tools *SnInfo) SnapUpStartSurplusTime(goodsId int) (SurplusTime time.Duration, err error) {
 	var response *http.Response
 	var readAll []byte
 	type sTime struct {
@@ -576,7 +452,7 @@ func (Tools *JdInfo) SnapUpStartSurplusTime(goodsId int) (SurplusTime time.Durat
 	return
 }
 
-func (Tools *JdInfo) SnapUp(goodsId int, logChan chan<- string) (err error) {
+func (Tools *SnInfo) SnapUp(goodsId int, logChan chan<- string) (err error) {
 	//err = Tools.SnapUpStartSurplusTime(goodId)
 	var request *http.Request
 	var response *http.Response
@@ -734,12 +610,17 @@ func (Tools *JdInfo) SnapUp(goodsId int, logChan chan<- string) (err error) {
 	_ = response.Body.Close()
 	err = json.Unmarshal(readAll, &sinfo)
 	if err != nil {
+		//logChan <- err.Error()  + " " + request.URL.String()
+		//continue
 		return fmt.Errorf("json解析错误:%s,text: '%s' ", err.Error(), string(readAll))
 	}
 	if sinfo.Code != "200" {
-		return fmt.Errorf("获取秒杀初始化信息失败：%s", readAll)
+		//logChan <- string(readAll) + " "+response.Request.URL.String()
+		//continue
+		return
+		//return fmt.Errorf(sinfo.Msg)
 	}
-	//fmt.Println(string(readAll))
+	fmt.Println(string(readAll))
 	var invoice string
 	if sinfo.InvoiceInfo.InvoiceContentType == 0 {
 		invoice = "false"
@@ -805,9 +686,7 @@ func (Tools *JdInfo) SnapUp(goodsId int, logChan chan<- string) (err error) {
 		request.Header.Add("Content-Type", "application/x-www-form-urlencoded")
 		response, err = client.Do(request)
 		if err != nil {
-			logtext := fmt.Sprintf("pocId:%s  %s", pocId, err.Error())
-			logChan <- logtext
-			logApi.DEBUG(logtext)
+			logChan <- fmt.Sprintf("pocId:%s  %s", pocId, err.Error())
 			continue
 		}
 		//defer response.Body.Close()
@@ -816,28 +695,20 @@ func (Tools *JdInfo) SnapUp(goodsId int, logChan chan<- string) (err error) {
 		err = json.Unmarshal(readAll, &qginfo)
 		if err != nil {
 			//fmt.Println(string(readAll))
-			logtext := fmt.Sprintf("pocId:%s json解析错误:%s,text: '%s' ", pocId, err.Error(), string(readAll))
-			logChan <- logtext
-			logApi.DEBUG(logtext)
+			logChan <- fmt.Sprintf("pocId:%s json解析错误:%s,text: '%s' ", pocId, err.Error(), string(readAll))
 			continue
 		}
 		if qginfo.Success == true {
-			logtext := fmt.Sprintf("pocId:%s 抢购成功，订单号:%d, 总价:%s, 电脑端付款链接:%s", pocId, qginfo.OrderId, qginfo.TotalMoney, qginfo.PcUrl)
-			logChan <- logtext
-			logApi.DEBUG(logtext)
+			logChan <- fmt.Sprintf("pocId:%s 抢购成功，订单号:%d, 总价:%s, 电脑端付款链接:%s", pocId, qginfo.OrderId, qginfo.TotalMoney, qginfo.PcUrl)
 			Tools.GoodsInfo[goodsId].SnapUpStatus = true
 			return
 		} else {
-			logtext := fmt.Sprintf("pocId:%s 抢购失败:%s", pocId, string(readAll))
-			logChan <- logtext
-			logApi.DEBUG(logtext)
+			logChan <- fmt.Sprintf("pocId:%s 抢购失败:%s", pocId, string(readAll))
 		}
 	}
 	if endTime.Unix() < time.Now().Unix() {
 		Tools.GoodsInfo[goodsId].SnapUpEndStatus = true
-		logtext := fmt.Sprintf("pocId:%s 抢购已经结束，未抢到", pocId)
-		logChan <- logtext
-		logApi.DEBUG(logtext)
+		logChan <- fmt.Sprintf("pocId:%s 抢购已经结束，未抢到", pocId)
 	}
 	return
 }
