@@ -650,11 +650,13 @@ func (Tools *JdInfo) SnapUp(goodsId int, logChan chan<- string) (err error) {
 	request.Header.Add("Referer", fmt.Sprintf("https://item.jd.com/%d.html", goodsId))
 	response, err = client.Do(request)
 	if err != nil {
+		logApi.DEBUG("获取抢购链接请求错误:%s ", err.Error())
 		return
 	}
 	//defer response.Body.Close()
 	readAll, err = ioutil.ReadAll(response.Body)
 	if err != nil {
+		logApi.DEBUG("读取response错误:%s", err.Error())
 		return
 	}
 	_ = response.Body.Close()
@@ -662,10 +664,12 @@ func (Tools *JdInfo) SnapUp(goodsId int, logChan chan<- string) (err error) {
 	allString := compile.FindString(string(readAll))
 	err = json.Unmarshal([]byte(allString), &qgurl)
 	if err != nil {
+		logApi.DEBUG("json解析错误:%s,text: '%s' ", err.Error(), allString)
 		return fmt.Errorf("json解析错误:%s,text: '%s' ", err.Error(), allString)
 	}
 	if qgurl.Url == "" {
 		err = fmt.Errorf("获取抢购链接失败")
+		logApi.DEBUG("获取抢购链接失败")
 		return
 	}
 	// 测试
@@ -681,6 +685,7 @@ func (Tools *JdInfo) SnapUp(goodsId int, logChan chan<- string) (err error) {
 	request.Header.Add("Referer", fmt.Sprintf("https://item.jd.com/%d.html", goodsId))
 	response, err = client.Do(request)
 	if err != nil {
+		logApi.DEBUG("访问抢购链接页面请求错误:%s ", err.Error())
 		return
 	}
 	_ = response.Body.Close()
@@ -703,6 +708,7 @@ func (Tools *JdInfo) SnapUp(goodsId int, logChan chan<- string) (err error) {
 	response, err = client.Do(request)
 	if err != nil {
 		//logChan <- err.Error()  + " " + request.URL.String()
+		logApi.DEBUG("订单结算页面请求错误:%s ", err.Error())
 		return
 	}
 	//defer response.Body.Close()
@@ -727,6 +733,7 @@ func (Tools *JdInfo) SnapUp(goodsId int, logChan chan<- string) (err error) {
 	if err != nil {
 		//logChan <- err.Error()  + " " + request.URL.String()
 		//continue
+		logApi.DEBUG("秒杀请求错误:%s ", err.Error())
 		return
 	}
 	//defer response.Body.Close()
@@ -734,9 +741,11 @@ func (Tools *JdInfo) SnapUp(goodsId int, logChan chan<- string) (err error) {
 	_ = response.Body.Close()
 	err = json.Unmarshal(readAll, &sinfo)
 	if err != nil {
+		logApi.DEBUG("json解析错误:%s,text: '%s' ", err.Error(), string(readAll))
 		return fmt.Errorf("json解析错误:%s,text: '%s' ", err.Error(), string(readAll))
 	}
 	if sinfo.Code != "200" {
+		logApi.DEBUG("获取秒杀初始化信息失败：%s", readAll)
 		return fmt.Errorf("获取秒杀初始化信息失败：%s", readAll)
 	}
 	//fmt.Println(string(readAll))
