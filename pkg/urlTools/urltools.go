@@ -40,6 +40,7 @@ func InitCookieJar(Cookiejar *cookiejar.Jar, File string) (NewCookiejar *cookiej
 		//path = "./cache"
 
 		NewCookiejar, _ = cookiejar.New(&cookiejar.Options{Filename: path + "/" + File, PersistSessionCookies: true})
+		//fmt.Println(path + "/" + File)
 		//fmt.Println(path + "/" + CacheDir + "/" + File)
 		//ioutil.WriteFile("/tmp/test1.log",[]byte(path + "/" + CacheDir + "/" + File),0644)
 		//NewCookiejar, _ = cookiejar.New(nil)
@@ -147,6 +148,30 @@ func FindChromePath() string {
 	// Fall back to something simple and sensible, to give a useful error
 	// message.
 	return ""
+}
+
+func ReadBody(body io.Reader, byteCount int) (read []byte, err error) {
+	if byteCount == 0 {
+		read, err = ioutil.ReadAll(body)
+		if err != nil {
+			return
+		}
+	} else if byteCount < 0 {
+		err = fmt.Errorf("'byteCount' 不能是负数")
+		return
+	} else {
+		var n int
+		buf := make([]byte, byteCount)
+		n, err = body.Read(buf)
+		if err != nil && err != io.EOF {
+			return
+		}
+		if err == io.EOF {
+			err = nil
+		}
+		read = buf[:n]
+	}
+	return
 }
 
 //func SaveCookie(Prefix string,UserName string,Cookiejar *cookiejar.Jar) (err error) {

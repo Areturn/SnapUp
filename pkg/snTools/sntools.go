@@ -23,32 +23,11 @@ import (
 
 type SnTools interface {
 	GetLoginQrcode() (qrcode image.Image, err error)                           //获取登录二维码
-	CheckLogin() (code int, err error)                                         //检查是否扫描登录成功
-	GetUserInfo() (err error)                                                  //获取用户信息
+	CheckLogin() (state string, err error)                                     //检查是否扫描登录成功
 	CheckCookies() (code int, err error)                                       //检查cookies是否过期
 	Reservation(JdUrl string) (goodsId int, err error)                         //预约
 	SnapUpStartSurplusTime(goodsId int) (SurplusTime time.Duration, err error) //等待抢购开始还有多长时间
 	SnapUp(goodsId int, logChan chan<- string) (err error)                     //抢购
-}
-
-type UserInfo struct {
-	HouseholdAppliance int    `json:"householdAppliance"`
-	ImgUrl             string `json:"imgUrl"`
-	LastLoginTime      string `json:"lastLoginTime"`
-	NickName           string `json:"nickName"`
-	PlusStatus         string `json:"plusStatus"`
-	RealName           string `json:"realName"`
-	UserLevel          int    `json:"userLevel"`
-	UserScoreVO        struct {
-		AccountScore     int    `json:"accountScore"`
-		ActivityScore    int    `json:"activityScore"`
-		ConsumptionScore int    `json:"consumptionScore"`
-		Default          bool   `json:"default"`
-		FinanceScore     int    `json:"financeScore"`
-		Pin              string `json:"pin"`
-		RiskScore        int    `json:"riskScore"`
-		TotalScore       int    `json:"total_score"`
-	} `json:"userScoreVO"`
 }
 
 type YuGouInfo struct {
@@ -76,7 +55,6 @@ type GoodsInfo struct {
 //var GoodsInfos = map[int]GoodsInfo{}
 
 type SnInfo struct {
-	UserInfo    UserInfo
 	LoginStatus bool
 	GoodsInfo   map[int]*GoodsInfo
 	CookiesJar  *cookiejar.Jar
@@ -101,6 +79,13 @@ func Init() *SnInfo {
 func (Tools *SnInfo) GetLoginQrcode() (qrcode image.Image, err error) {
 	var request *http.Request
 	var response *http.Response
+	var readAll []byte
+
+	type tokenInfo struct {
+		Code  string `json:"code"`
+		Token string `json:"token"`
+	}
+	var tkinfo tokenInfo
 
 	Tools.CookiesJar, err = urlTools.InitCookieJar(Tools.CookiesJar, CookiesFile)
 	if err != nil {
@@ -118,7 +103,42 @@ func (Tools *SnInfo) GetLoginQrcode() (qrcode image.Image, err error) {
 	}
 	_ = response.Body.Close()
 
-	QrcodeUrl := "https://passport.suning.com/ids/qrLoginUuidGenerate.htm?image=true&yys=1610282949429"
+	Url := "https://mmds.suning.com/mmds/webCollectInit.json?appCode=qEmt9X4YmoV2Vye8"
+	request, _ = http.NewRequest("GET", Url, nil)
+	request = urlTools.AddHeader(request, Headers)
+	response, err = client.Do(request)
+	if err != nil {
+		return
+	}
+	readAll, err = ioutil.ReadAll(response.Body)
+	if err != nil {
+		return
+	}
+	_ = response.Body.Close()
+
+	compile := regexp.MustCompile(`(?s:\{.*\})`)
+	findString := compile.FindString(string(readAll))
+
+	err = json.Unmarshal([]byte(findString), &tkinfo)
+	if err != nil {
+		return
+	}
+
+	if tkinfo.Code != "200" {
+		err = fmt.Errorf("获取token异常")
+		return
+	}
+
+	//token := uuid.New()
+	token := tkinfo.Token
+	u, _ := url.Parse("https://suning.com")
+	cookies := []*http.Cookie{}
+	expires, _ := time.Parse("2006-01-02T15:04:05Z", "9999-12-31T23:59:59Z")
+	cookies = append(cookies, &http.Cookie{Name: "token", Value: token, Path: "/", Domain: ".suning.com", Expires: expires})
+	Tools.CookiesJar.SetCookies(u, cookies)
+	fmt.Println(Tools.CookiesJar.AllCookies())
+
+	QrcodeUrl := "https://passport.suning.com/ids/qrLoginUuidGenerate.htm"
 	var QueryValues url.Values = map[string][]string{"image": {"true"}, "yys": {strconv.FormatInt(time.Now().UnixNano(), 10)[:13]}, "t": {strconv.FormatInt(time.Now().UnixNano(), 10)[:13]}}
 	parse, _ := url.Parse(QrcodeUrl)
 	parse.RawQuery = QueryValues.Encode()
@@ -137,160 +157,93 @@ func (Tools *SnInfo) GetLoginQrcode() (qrcode image.Image, err error) {
 		err = fmt.Errorf("状态码：%s,获取登录二维码失败", response.Status)
 	}
 	_ = response.Body.Close()
-
 	return
 }
 
-func (Tools *SnInfo) CheckLogin() (code int, err error) {
+func (Tools *SnInfo) CheckLogin() (state string, err error) {
 	type QrCheckInfo struct {
-		Code   int    `json:"code"`
-		Msg    string `json:"msg"`
-		Ticket string `json:"ticket"`
-	}
-	type qrCodeTicketValidation struct {
-		ReturnCode int `json:"returnCode"`
+		State string `json:"state"`
 	}
 	var request *http.Request
 	var response *http.Response
-	var token string
+	var uuid string
 	var readAll []byte
 	var qcinfo QrCheckInfo
-	var qctv qrCodeTicketValidation
+	var postData url.Values
 
 	client := &http.Client{CheckRedirect: nil, Jar: Tools.CookiesJar}
-	Url := "https://qr.m.jd.com/check"
+	Url := "https://passport.suning.com/ids/qrLoginStateProbe"
 	//var n int = 85
-	for {
-		u, _ := url.Parse(Url)
-		cookies := Tools.CookiesJar.Cookies(u)
-		for _, v := range cookies {
-			if v.Name == "wlfstk_smdl" {
-				token = v.Value
-				break
-			}
+	u, _ := url.Parse(Url)
+	cookies := Tools.CookiesJar.Cookies(u)
+	for _, v := range cookies {
+		if v.Name == "ids_qr_uuid" {
+			uuid = v.Value
+			break
 		}
-		r := rand.New(rand.NewSource(time.Now().UnixNano()))
-		var callback = "jQuery" + strconv.Itoa(r.Int())[:9]
-
-		var QueryValues url.Values = map[string][]string{"appid": {"133"}, "callback": {callback}, "token": {token}, "_": {strconv.FormatInt(time.Now().UnixNano(), 10)[:13]}}
-		parse, _ := url.Parse(Url)
-		parse.RawQuery = QueryValues.Encode()
-		//fmt.Println(parse.String())
-		request, _ = http.NewRequest("GET", parse.String(), nil)
+	}
+	postData = url.Values{
+		"service":  {""},
+		"terminal": {"PC"},
+		"uuid":     {uuid},
+	}
+	for {
+		request, _ = http.NewRequest("POST", Url, strings.NewReader(postData.Encode()))
+		//fmt.Println(postData)
 		request = urlTools.AddHeader(request, Headers)
-		request.Header.Add("Referer", "https://passport.jd.com/")
-		//url_tools.AddCookies(request,QrcodeCookies)
-		//fmt.Println(request)
+		request.Header.Add("Referer", "https://passport.suning.com/ids/login?method=GET&loginTheme=b2c")
+		request.Header.Add("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
 		response, err = client.Do(request)
 		if err != nil {
 			return
 		}
-		//defer response.Body.Close()
-		//Tools.Client.Jar.SetCookies(response.Request.URL,response.Cookies())
 
 		readAll, err = ioutil.ReadAll(response.Body)
 		if err != nil {
+			fmt.Println(readAll)
 			return
 		}
 		_ = response.Body.Close()
-		//fmt.Println(string(readAll))
-		//fmt.Println(Tools.CookiesJar)
-		compile := regexp.MustCompile(`(?s:\{.*\})`)
-		findString := compile.FindString(string(readAll))
 
-		err = json.Unmarshal([]byte(findString), &qcinfo)
+		err = json.Unmarshal(readAll, &qcinfo)
 		if err != nil {
 			return
 		}
-		code = qcinfo.Code
-		// 201:二维码未扫描，请扫描二维码	202:请手机客户端确认登录	203:二维码过期，请重新扫描	205:二维码已取消授权
-		if qcinfo.Code == 201 || qcinfo.Code == 202 {
-			//err = fmt.Errorf("err_msg: '%s'",qcinfo.Msg)
+		//0：未扫描
+		//1：手机扫描了二维码
+		//2：手机确认授权
+		//3：过期，二维码已失效
+		//4：系统异常；账号异常，请使用账号密码登录
+		//5：系统锁；您的账号已被锁定，请1小时后再试
+		//6：人工锁；账号锁定，请联系客服
+		//10、11、12：风控；账号存在风险，请使用账号密码登录
+		//14：取消登录授权
+		state = qcinfo.State
+		switch state {
+		case "0":
+			time.Sleep(2 * time.Second)
 			continue
-		} else if qcinfo.Code == 200 {
-			Url := "https://passport.jd.com/uc/qrCodeTicketValidation"
-			var QueryValues url.Values = map[string][]string{"t": {qcinfo.Ticket}}
-			parse, _ := url.Parse(Url)
-			parse.RawQuery = QueryValues.Encode()
-			request, _ = http.NewRequest("GET", parse.String(), nil)
-			request = urlTools.AddHeader(request, Headers)
-			request.Header.Add("Referer", "https://passport.jd.com/uc/login?ltype=logout")
-			response, err = client.Do(request)
+		case "1":
+			time.Sleep(2 * time.Second)
+			continue
+		case "2":
+			Tools.LoginStatus = true
+			err = Tools.CookiesJar.Save()
 			if err != nil {
-				code = 300
-				return
+				state = "100"
 			}
-			//defer response.Body.Close()
-			readAll, err = ioutil.ReadAll(response.Body)
-			if err != nil {
-				code = 300
-				return
-			}
-			_ = response.Body.Close()
-			err = json.Unmarshal(readAll, &qctv)
-			if err != nil {
-				code = 300
-				return
-			}
-			if qctv.ReturnCode == 0 {
-				Tools.LoginStatus = true
-				err = Tools.CookiesJar.Save()
-				//ioutil.WriteFile("/tmp/test.log",[]byte(err.Error()),0644)
-				if err != nil {
-					code = 300
-				}
-				return
-			} else {
-				err = fmt.Errorf("二维码信息校验失败")
-				if err != nil {
-					code = 300
-				}
-				return
-			}
-		} else if qcinfo.Code == 203 || qcinfo.Code == 205 {
-			err = fmt.Errorf("code: %d ,err_msg: '%s'", qcinfo.Code, qcinfo.Msg)
 			return
-		} else {
-			err = fmt.Errorf("code: %d ,err_msg: '%s'", qcinfo.Code, qcinfo.Msg)
+		case "3":
+			err = fmt.Errorf("二维码已失效")
+			return
+		case "14":
+			err = fmt.Errorf("取消登录授权")
+			return
+		default:
+			err = fmt.Errorf("登录异常，请检查帐号是否被限制")
 			return
 		}
-		time.Sleep(2 * time.Second)
 	}
-	//return
-}
-
-func (Tools *SnInfo) GetUserInfo() (err error) {
-	var request *http.Request
-	var response *http.Response
-	var readAll []byte
-
-	client := &http.Client{CheckRedirect: nil, Jar: Tools.CookiesJar}
-
-	Url := "https://passport.jd.com/user/petName/getUserInfoForMiniJd.action"
-	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-	var QueryValues url.Values = map[string][]string{"callback": {"jQuery" + strconv.Itoa(r.Int())[:7]}, "_": {strconv.FormatInt(time.Now().UnixNano(), 10)[:13]}}
-	parse, _ := url.Parse(Url)
-	parse.RawQuery = QueryValues.Encode()
-	request, _ = http.NewRequest("GET", parse.String(), nil)
-	request = urlTools.AddHeader(request, Headers)
-	request.Header.Add("Referer", "https://order.jd.com/center/list.action")
-	response, err = client.Do(request)
-	if err != nil {
-		return
-	}
-	//defer response.Body.Close()
-	readAll, err = ioutil.ReadAll(response.Body)
-	if err != nil {
-		return
-	}
-	_ = response.Body.Close()
-	compile := regexp.MustCompile(`(?s:\{.*\})`)
-	allString := compile.FindString(string(readAll))
-	err = json.Unmarshal([]byte(allString), &Tools.UserInfo)
-	if err != nil {
-		return
-	}
-	return
 }
 
 func (Tools *SnInfo) CheckCookies() (code int, err error) {
@@ -304,21 +257,16 @@ func (Tools *SnInfo) CheckCookies() (code int, err error) {
 		return http.ErrUseLastResponse
 	}, Jar: Tools.CookiesJar}
 
-	Url := "https://order.jd.com/center/list.action"
-	var QueryValues url.Values = map[string][]string{"rid": {strconv.FormatInt(time.Now().UnixNano(), 10)[:13]}}
-	parse, _ := url.Parse(Url)
-	parse.RawQuery = QueryValues.Encode()
-	request, _ = http.NewRequest("GET", parse.String(), nil)
+	Url := "https://my.suning.com/msi2pc/memberInfo.do"
+	request, _ = http.NewRequest("GET", Url, nil)
 	request = urlTools.AddHeader(request, Headers)
 	response, err = client.Do(request)
 	if err != nil {
 		return
 	}
-	//defer response.Body.Close()
 	_ = response.Body.Close()
 	code = response.StatusCode
-	//fmt.Println(Tools.CookiesJar)
-	//fmt.Println(response.Request.URL,response.Status)
+	fmt.Println(response.Request)
 	if code == 200 {
 		Tools.LoginStatus = true
 	} else if code == 302 {

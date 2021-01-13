@@ -130,7 +130,7 @@ var GetEidFpHtml = `<!DOCTYPE html>
 
 var CookiesFile = "jd.cookies"
 var LocalZone = time.FixedZone("CST", int((8 * time.Hour).Seconds()))
-var logApi = logger.Newlogger(logger.DEBUG, os.Stdout, logger.Ldate|logger.Lmicroseconds|logger.Llongfile)
+var logApi = logger.Newlogger(logger.ERROR, os.Stdout, logger.Ldate|logger.Lmicroseconds|logger.Llongfile)
 
 func Init() *JdInfo {
 	info := &JdInfo{GoodsInfo: make(map[int]*GoodsInfo)}
@@ -291,6 +291,7 @@ func (Tools *JdInfo) CheckLogin() (code int, err error) {
 		// 201:二维码未扫描，请扫描二维码	202:请手机客户端确认登录	203:二维码过期，请重新扫描	205:二维码已取消授权
 		if qcinfo.Code == 201 || qcinfo.Code == 202 {
 			//err = fmt.Errorf("err_msg: '%s'",qcinfo.Msg)
+			time.Sleep(2 * time.Second)
 			continue
 		} else if qcinfo.Code == 200 {
 			Url := "https://passport.jd.com/uc/qrCodeTicketValidation"
@@ -339,7 +340,6 @@ func (Tools *JdInfo) CheckLogin() (code int, err error) {
 			err = fmt.Errorf("code: %d ,err_msg: '%s'", qcinfo.Code, qcinfo.Msg)
 			return
 		}
-		time.Sleep(2 * time.Second)
 	}
 	//return
 }
@@ -580,7 +580,7 @@ func (Tools *JdInfo) SnapUp(goodsId int, logChan chan<- string) (err error) {
 	//err = Tools.SnapUpStartSurplusTime(goodId)
 	var request *http.Request
 	var response *http.Response
-	var readAll []byte
+	var read []byte
 	var skuId = strconv.Itoa(goodsId)
 	var Url string
 	var postData url.Values
@@ -654,18 +654,19 @@ func (Tools *JdInfo) SnapUp(goodsId int, logChan chan<- string) (err error) {
 		return
 	}
 	//defer response.Body.Close()
-	readAll, err = ioutil.ReadAll(response.Body)
+	//readAll, err = ioutil.ReadAll(response.Body)
+	read, err = urlTools.ReadBody(response.Body, 1024)
 	if err != nil {
-		logApi.DEBUG("读取response错误:%s", err.Error())
+		logApi.DEBUG("获取抢购链接请求时,读取response错误:%s", err.Error())
 		return
 	}
 	_ = response.Body.Close()
 	compile := regexp.MustCompile(`(?s:\{.*\})`)
-	allString := compile.FindString(string(readAll))
+	allString := compile.FindString(string(read))
 	err = json.Unmarshal([]byte(allString), &qgurl)
 	if err != nil {
-		logApi.DEBUG("json解析错误:%s,text: '%s' ", err.Error(), allString)
-		return fmt.Errorf("json解析错误:%s,text: '%s' ", err.Error(), allString)
+		logApi.DEBUG("获取抢购链接时,json解析错误:%s,text: '%s' ", err.Error(), allString)
+		return fmt.Errorf("获取抢购链接时,json解析错误:%s", err.Error())
 	}
 	if qgurl.Url == "" {
 		err = fmt.Errorf("获取抢购链接失败")
@@ -733,20 +734,22 @@ func (Tools *JdInfo) SnapUp(goodsId int, logChan chan<- string) (err error) {
 	if err != nil {
 		//logChan <- err.Error()  + " " + request.URL.String()
 		//continue
-		logApi.DEBUG("秒杀请求错误:%s ", err.Error())
+		logApi.DEBUG("秒杀初始化信息请求错误:%s ", err.Error())
 		return
 	}
 	//defer response.Body.Close()
-	readAll, err = ioutil.ReadAll(response.Body)
+	//readAll, err = ioutil.ReadAll(response.Body)
+	read, err = urlTools.ReadBody(response.Body, 4096)
 	_ = response.Body.Close()
-	err = json.Unmarshal(readAll, &sinfo)
+	err = json.Unmarshal(read, &sinfo)
 	if err != nil {
-		logApi.DEBUG("json解析错误:%s,text: '%s' ", err.Error(), string(readAll))
-		return fmt.Errorf("json解析错误:%s,text: '%s' ", err.Error(), string(readAll))
+		logApi.DEBUG("获取秒杀初始化信息时，json解析错误:%s,text: '%s' ", err.Error(), string(read[:1024]))
+		return fmt.Errorf("获取秒杀初始化信息时，json解析错误:%s", err.Error())
 	}
+
 	if sinfo.Code != "200" {
-		logApi.DEBUG("获取秒杀初始化信息失败：%s", readAll)
-		return fmt.Errorf("获取秒杀初始化信息失败：%s", readAll)
+		logApi.DEBUG("获取秒杀初始化信息失败：%s", string(read))
+		return fmt.Errorf("获取秒杀初始化信息失败")
 	}
 	//fmt.Println(string(readAll))
 	var invoice string
@@ -814,19 +817,20 @@ func (Tools *JdInfo) SnapUp(goodsId int, logChan chan<- string) (err error) {
 		request.Header.Add("Content-Type", "application/x-www-form-urlencoded")
 		response, err = client.Do(request)
 		if err != nil {
-			logtext := fmt.Sprintf("pocId:%s  %s", pocId, err.Error())
+			logtext := fmt.Sprintf("pocId:%s  提交订单出错: %s", pocId, err.Error())
 			logChan <- logtext
 			logApi.DEBUG(logtext)
 			continue
 		}
 		//defer response.Body.Close()
-		readAll, err = ioutil.ReadAll(response.Body)
+		//readAll, err = ioutil.ReadAll(response.Body)
+		read, err = urlTools.ReadBody(response.Body, 1024)
 		_ = response.Body.Close()
-		err = json.Unmarshal(readAll, &qginfo)
+		err = json.Unmarshal(read, &qginfo)
 		if err != nil {
 			//fmt.Println(string(readAll))
-			logtext := fmt.Sprintf("pocId:%s json解析错误:%s,text: '%s' ", pocId, err.Error(), string(readAll))
-			logChan <- logtext
+			logtext := fmt.Sprintf("pocId:%s json解析错误:%s,text: '%s' ", pocId, err.Error(), string(read))
+			logChan <- fmt.Sprintf("pocId:%s 提交订单出错,json解析错误:%s", pocId, err.Error())
 			logApi.DEBUG(logtext)
 			continue
 		}
@@ -836,8 +840,12 @@ func (Tools *JdInfo) SnapUp(goodsId int, logChan chan<- string) (err error) {
 			logApi.DEBUG(logtext)
 			Tools.GoodsInfo[goodsId].SnapUpStatus = true
 			return
+		} else if qginfo.Success == false {
+			logtext := fmt.Sprintf("pocId:%s 抢购失败:%s", pocId, string(read))
+			logChan <- logtext
+			logApi.DEBUG(logtext)
 		} else {
-			logtext := fmt.Sprintf("pocId:%s 抢购失败:%s", pocId, string(readAll))
+			logtext := fmt.Sprintf("pocId:%s 抢购失败，未知错误: %s", pocId, string(read))
 			logChan <- logtext
 			logApi.DEBUG(logtext)
 		}

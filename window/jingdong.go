@@ -13,7 +13,6 @@ import (
 	"fyne.io/fyne/theme"
 	"fyne.io/fyne/widget"
 	"image"
-	"image/color"
 	"net/url"
 	"os"
 	"regexp"
@@ -24,7 +23,7 @@ import (
 
 var userName string
 
-var logApi = logger.Newlogger(logger.DEBUG, os.Stdout, logger.Ldate|logger.Lmicroseconds|logger.Llongfile)
+var logApi = logger.Newlogger(logger.ERROR, os.Stdout, logger.Ldate|logger.Lmicroseconds|logger.Llongfile)
 
 func JdEntrance(a fyne.App, w fyne.Window) (err error) {
 	w.SetTitle("抢购神器-京东模式")
@@ -375,11 +374,11 @@ func getEipFpDialog(title string, w fyne.Window, tools *jdTools.JdInfo) {
 	}, w)
 }
 
-func makeCell() fyne.CanvasObject {
-	rect := canvas.NewRectangle(&color.NRGBA{R: 128, G: 128, B: 128, A: 255})
-	rect.SetMinSize(fyne.NewSize(2, 2))
-	return rect
-}
+//func makeCell() fyne.CanvasObject {
+//	rect := canvas.NewRectangle(&color.NRGBA{R: 128, G: 128, B: 128, A: 255})
+//	rect.SetMinSize(fyne.NewSize(2, 2))
+//	return rect
+//}
 
 func reverseString(s string) string {
 	runes := []rune(s)
